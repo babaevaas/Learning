@@ -1,0 +1,259 @@
+*&---------------------------------------------------------------------*
+*& Report  ZA_11
+*&
+*&---------------------------------------------------------------------*
+*&
+*&
+*&---------------------------------------------------------------------*
+
+REPORT za_11.
+
+TYPES: BEGIN OF t_vbak,
+  vbeln TYPE vbak-vbeln,
+  audat TYPE vbak-audat,
+  auart TYPE vbak-auart,
+  kunnr TYPE vbak-kunnr,
+  waerk TYPE vbak-waerk,
+  knumv TYPE vbak-knumv,
+  END OF t_vbak.
+
+TYPES: BEGIN OF t_vbap,
+  vbeln TYPE vbap-vbeln,
+  posnr TYPE vbap-posnr,
+  matnr TYPE vbap-matnr,
+  kwmeng TYPE vbap-kwmeng,
+  END OF t_vbap.
+
+TYPES: BEGIN OF t_makt,
+matnr TYPE makt-matnr,
+maktx TYPE makt-maktx,
+spras TYPE makt-spras,
+  END OF t_makt.
+
+TYPES: BEGIN OF t_konv,
+  knumv TYPE konv-knumv,
+  kposn TYPE konv-kposn, " равен номеру позиции заказа Posnr
+  kschl TYPE konv-kschl, "(‘MWST’ – налог, ‘PR00’ - цена)
+  kbetr TYPE konv-kbetr,
+  END OF t_konv.
+
+
+TYPES: BEGIN OF t_lips,
+vbeln TYPE lips-vbeln,
+posnr TYPE lips-posnr,
+lfimg TYPE lips-lfimg,
+vrkme TYPE lips-vrkme,
+vgbel TYPE lips-vgbel,
+vgpos TYPE lips-vgpos,
+  END OF t_lips.
+
+TYPES: BEGIN OF t_out,
+  vbeln TYPE vbak-vbeln,
+  posnr TYPE vbap-posnr,
+  matnr TYPE vbap-matnr,
+  maktx TYPE makt-maktx,
+  lfimg TYPE lips-lfimg,
+  vrkme TYPE lips-vrkme,
+  waerk TYPE vbak-waerk,
+  kbetr_mwst TYPE konv-kbetr,
+  kbetr_pr00 TYPE konv-kbetr,
+  deliv TYPE dd07v-ddtext,
+  END OF t_out.
+
+DATA: gs_vbak TYPE t_vbak,
+    gt_vbak TYPE TABLE OF t_vbak,
+    gs_vbap TYPE t_vbap,
+    gt_vbap TYPE TABLE OF t_vbap,
+    gs_makt TYPE t_makt,
+    gt_makt TYPE TABLE OF t_makt,
+    gs_konv TYPE t_konv,
+    gt_konv TYPE TABLE OF t_konv,
+    gs_lips TYPE t_lips,
+    gt_lips TYPE TABLE OF t_lips,
+    gs_out TYPE t_out,
+    gt_out TYPE TABLE OF t_out,
+    gs_del_type TYPE dd07v,
+    gt_del_type TYPE TABLE OF dd07v.
+
+DATA: gt_fieldcat TYPE slis_t_fieldcat_alv,
+      gs_fieldcat LIKE LINE OF gt_fieldcat.
+
+SELECTION-SCREEN BEGIN OF BLOCK frame1 WITH FRAME TITLE text-001.
+PARAMETERS p_kunnr TYPE vbak-kunnr DEFAULT 'T-S66A01' OBLIGATORY.
+SELECT-OPTIONS so_matnr FOR gs_vbap-matnr DEFAULT 'T-ASA01'.
+PARAMETERS p_auart TYPE vbak-auart DEFAULT 'TA' OBLIGATORY.
+SELECT-OPTIONS so_audat FOR gs_vbak-audat.
+SELECTION-SCREEN END OF BLOCK frame1.
+
+SELECTION-SCREEN BEGIN OF BLOCK frame2 WITH FRAME TITLE text-002.
+PARAMETERS: p_vkorg TYPE vbak-vkorg DEFAULT '1000' OBLIGATORY,
+p_vtweg TYPE vbak-vtweg DEFAULT '10' OBLIGATORY,
+p_spart TYPE vbak-spart DEFAULT '00' OBLIGATORY.
+SELECTION-SCREEN END OF BLOCK frame2.
+
+SELECTION-SCREEN BEGIN OF BLOCK frame3 WITH FRAME TITLE text-003.
+PARAMETERS p_rb1 RADIOBUTTON GROUP rb MODIF ID rb1 USER-COMMAND cmd DEFAULT 'X'.
+
+SELECTION-SCREEN BEGIN OF BLOCK frame4 WITH FRAME TITLE text-004.
+PARAMETERS:
+p_cb1 AS CHECKBOX MODIF ID cb,
+p_cb2 AS CHECKBOX DEFAULT 'X' MODIF ID cb.
+SELECTION-SCREEN END OF BLOCK frame4.
+
+PARAMETERS p_rb2 RADIOBUTTON GROUP rb MODIF ID rb2.
+SELECTION-SCREEN END OF BLOCK frame3.
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF screen-group1 = 'CB' AND p_rb2 = 'X'.
+      screen-active = '0'.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+
+AT SELECTION-SCREEN ON RADIOBUTTON GROUP rb.
+  LOOP AT SCREEN.
+    IF screen-group1 = 'CB' AND p_rb2 = 'X'.
+      screen-active = '0'.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
+
+START-OF-SELECTION.
+
+  SELECT *
+    FROM vbak
+    INTO CORRESPONDING FIELDS OF TABLE gt_vbak
+    WHERE audat IN so_audat
+      AND kunnr = p_kunnr
+      AND auart = p_auart
+      AND vkorg = p_vkorg
+      AND vtweg = p_vtweg
+      AND spart = p_spart.
+
+  SELECT *
+    FROM vbap
+    INTO CORRESPONDING FIELDS OF TABLE gt_vbap
+    FOR ALL ENTRIES IN gt_vbak
+    WHERE vbeln = gt_vbak-vbeln
+      AND matnr IN so_matnr.
+
+  SELECT *
+    FROM makt
+    INTO CORRESPONDING FIELDS OF TABLE gt_makt
+    FOR ALL ENTRIES IN gt_vbap
+    WHERE matnr = gt_vbap-matnr
+      AND spras = 'RU'.
+
+  SELECT *
+    FROM konv
+    INTO CORRESPONDING FIELDS OF TABLE gt_konv
+    FOR ALL ENTRIES IN gt_vbak
+    WHERE knumv = gt_vbak-knumv
+      AND kschl IN ('PR00', 'MWST').
+
+  SELECT *
+    FROM lips
+    INTO CORRESPONDING FIELDS OF TABLE gt_lips
+    FOR ALL ENTRIES IN gt_vbap
+    WHERE vgpos = gt_vbap-posnr
+      AND vgbel = gt_vbap-vbeln.
+
+  CALL FUNCTION 'DDUT_DOMVALUES_GET'
+    EXPORTING
+      name      = 'ZDM_DOSTAVKA'
+    TABLES
+      dd07v_tab = gt_del_type.
+
+  LOOP AT gt_vbak INTO gs_vbak.
+    CLEAR gs_out.
+    LOOP AT gt_vbap INTO gs_vbap WHERE vbeln = gs_vbak-vbeln.
+
+      READ TABLE gt_lips INTO gs_lips WITH KEY vgpos = gs_vbap-posnr
+                                               vgbel = gs_vbak-vbeln.
+
+      READ TABLE gt_makt INTO gs_makt WITH KEY matnr = gs_vbap-matnr.
+
+      LOOP AT gt_konv INTO gs_konv WHERE knumv = gs_vbak-knumv
+                                     AND kposn = gs_vbap-posnr.
+        IF gs_konv-kschl = 'PR00'.
+          gs_out-kbetr_pr00 = gs_konv-kbetr.
+        ELSEIF gs_konv-kschl = 'MWST'.
+          gs_out-kbetr_mwst = gs_konv-kbetr.
+        ENDIF.
+      ENDLOOP.
+
+      IF gs_lips-lfimg = 0.
+        READ TABLE gt_del_type INTO gs_del_type WITH KEY domvalue_l = 'NON'.
+        gs_out-deliv = gs_del_type-ddtext.
+
+      ELSEIF gs_lips-lfimg = gs_vbap-kwmeng.
+        READ TABLE gt_del_type INTO gs_del_type WITH KEY domvalue_l = 'ALL'.
+        gs_out-deliv = gs_del_type-ddtext.
+
+      ELSEIF gs_vbap-kwmeng > gs_lips-lfimg.
+        READ TABLE gt_del_type INTO gs_del_type WITH KEY domvalue_l = 'PRT'.
+        gs_out-deliv = gs_del_type-ddtext.
+      ENDIF.
+
+      gs_out-vbeln = gs_vbak-vbeln.
+      gs_out-waerk = gs_vbak-waerk.
+      gs_out-posnr = gs_vbap-posnr.
+      gs_out-matnr = gs_vbap-matnr.
+      gs_out-maktx = gs_makt-maktx.
+      gs_out-lfimg = gs_lips-lfimg.
+      gs_out-vrkme = gs_lips-vrkme.
+      APPEND gs_out TO gt_out.
+    ENDLOOP.
+  ENDLOOP.
+
+  IF p_rb2 IS NOT INITIAL.
+    DELETE gt_out WHERE deliv <> 'Без поставки'.
+  ELSEIF p_rb1 IS NOT INITIAL AND p_cb1 IS NOT INITIAL.
+    DELETE gt_out WHERE deliv <> 'Частичная'.
+  ELSEIF p_rb1 IS NOT INITIAL AND p_cb2 IS NOT INITIAL.
+    DELETE gt_out WHERE deliv <> 'Полная'.
+  ELSEIF p_rb1 IS NOT INITIAL AND p_cb1 IS NOT INITIAL AND p_cb2 IS NOT INITIAL.
+    DELETE gt_out WHERE deliv = 'Без поставки'.
+  ELSE.
+    CLEAR gt_out.
+  ENDIF.
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_structure_name       = 'ZST_ZA11'   "имя структуры ABAP-словаря
+      i_bypassing_buffer     = 'X'
+    CHANGING
+      ct_fieldcat            = gt_fieldcat[]
+    EXCEPTIONS
+      inconsistent_interface = 1
+      program_error          = 2
+      OTHERS                 = 3.
+
+  LOOP AT gt_fieldcat INTO gs_fieldcat.
+    IF gs_fieldcat-fieldname = 'KBETR_MWST'.
+      gs_fieldcat-seltext_s = 'Налог'.
+      gs_fieldcat-seltext_m = 'Налог'.
+      gs_fieldcat-seltext_l = 'Налог'.
+    ELSEIF gs_fieldcat-fieldname = 'KBETR_PR00'.
+      gs_fieldcat-seltext_s = 'Цена'.
+      gs_fieldcat-seltext_m = 'Цена'.
+      gs_fieldcat-seltext_l = 'Цена'.
+    ELSEIF gs_fieldcat-fieldname = 'DELIV'.
+      gs_fieldcat-seltext_s = 'Вид поставки'.
+      gs_fieldcat-seltext_m = 'Вид поставки'.
+      gs_fieldcat-seltext_l = 'Вид поставки'.
+    ENDIF.
+    MODIFY gt_fieldcat FROM gs_fieldcat.
+  ENDLOOP.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      it_fieldcat              = gt_fieldcat[]              "FIELD-каталог
+      i_save                   = 'X'
+      i_bypassing_buffer       = 'X'
+    TABLES
+      t_outtab                 = gt_out[]   "таблица с данными, структура данных идентична таблице FIELD-каталога
+    EXCEPTIONS
+      program_error            = 1
+      OTHERS                   = 2.
